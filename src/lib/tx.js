@@ -38,7 +38,19 @@ export const withTransaction = async (pool, fn, options = {}) => {
     statementTimeoutMs,
   } = options;
 
-  const client = await pool.connect();
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    // pg-pool rejects with this when connectionTimeoutMillis elapses while
+    // every connection is checked out. The transaction never started, so this
+    // is backpressure, not a failure — shed the load and let the client retry.
+    if (/timeout exceeded when trying to connect/i.test(err.message)) {
+      throw errors.serviceBusy();
+    }
+    throw err;
+  }
+
   try {
     await client.query(`BEGIN ISOLATION LEVEL ${isolationLevel}`);
 

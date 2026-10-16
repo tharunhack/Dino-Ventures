@@ -70,6 +70,15 @@ export const errors = {
       'The wallet is under heavy contention and the request could not be completed. Retry with the same Idempotency-Key.',
     ),
 
+  // Load shedding: every pooled connection is busy, so the transaction never
+  // began and nothing was written. Safe to retry with the same key.
+  serviceBusy: () =>
+    appError(
+      'SERVICE_BUSY',
+      503,
+      'All database connections are in use. No work was performed. Retry with the same Idempotency-Key.',
+    ),
+
   userNotActive: (status) =>
     appError('USER_NOT_ACTIVE', 422, `The user account is ${status}.`),
 };

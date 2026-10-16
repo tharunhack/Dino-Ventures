@@ -35,6 +35,10 @@ const errorHandler = (error, request, reply) => {
     if (error.statusCode >= 500) request.log.error({ err: error }, error.code);
     else request.log.info({ code: error.code }, 'request rejected');
 
+    // Backpressure responses are retryable and nothing was written; tell the
+    // client so rather than leaving it to guess.
+    if (error.statusCode === 503) reply.header('retry-after', '1');
+
     return reply.code(error.statusCode).send({
       error: {
         code: error.code,

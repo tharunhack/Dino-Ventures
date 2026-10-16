@@ -207,6 +207,10 @@ Errors share one envelope, `{ "error": { "code", "message", "details"? } }`:
 | 422 | `INSUFFICIENT_FUNDS` | Spend exceeds the balance; `details` carries balance, requested, shortfall |
 | 422 | `USER_NOT_ACTIVE` | User is suspended or closed |
 | 503 | `WALLET_CONTENDED` | Retries exhausted under extreme contention; safe to retry with the same key |
+| 503 | `SERVICE_BUSY` | Every pooled connection is in use. The transaction never began, so nothing was written; retry with the same key |
+
+Both 503s carry a `Retry-After` header and are safe to retry with the **same**
+`Idempotency-Key` — that is precisely what the key is for.
 
 ---
 
@@ -446,9 +450,25 @@ no deadlock recorded by Postgres.
 
 ---
 
+## Deployment
+
+See **[DEPLOY.md](DEPLOY.md)** for step-by-step instructions.
+
+- **Container host (Render / Railway / Fly.io)** — the natural fit. The
+  `Dockerfile` needs no changes.
+- **Vercel + Neon** — supported via `api/index.js` and `vercel.json`. The
+  service detects `VERCEL` and adapts its pool size and lock timeouts for a
+  serverless runtime on its own.
+
+Either way, correctness is unaffected by how many instances run: every
+concurrency guarantee lives in Postgres — the row locks, the lock ordering, the
+idempotency primary key — not in the Node process. Multiple instances behave
+exactly like multiple threads of a single server.
+
 ## Project layout
 
 ```
+api/index.js                Vercel serverless entrypoint (see DEPLOY.md)
 db/
   migrations/001_init.sql   schema, constraints, triggers, reconciliation view
   seed.sql                  assets, system accounts, users, opening balances

@@ -36,7 +36,12 @@ const post = async (path, body, idempotencyKey) => {
     },
     body: JSON.stringify(body),
   });
-  return { status: res.status, body: await res.json() };
+  // Carry the request along so a shed response can be replayed verbatim.
+  return {
+    status: res.status,
+    body: await res.json(),
+    request: { path, body, key: idempotencyKey },
+  };
 };
 
 const get = async (path) => {
@@ -205,17 +210,36 @@ const scenarioDeadlockBait = async () => {
   const results = await Promise.all(jobs);
 
   const contended = results.filter((r) => r.body.error?.code === 'WALLET_CONTENDED');
-  const serverErrors = results.filter((r) => r.status >= 500);
+  // Load shedding is a correct response, not a failure: the transaction never
+  // began. It is reported, then retried below to prove it resolves.
+  const shed = results.filter((r) => r.body.error?.code === 'SERVICE_BUSY');
+  const internal = results.filter(
+    (r) => r.status >= 500 && !['SERVICE_BUSY', 'WALLET_CONTENDED'].includes(r.body.error?.code),
+  );
 
   console.log(
     `  ${results.filter((r) => r.status === 201).length} posted, ` +
-      `${contended.length} exhausted retries, ${serverErrors.length} server errors`,
+      `${contended.length} exhausted retries, ${shed.length} shed (503), ` +
+      `${internal.length} internal errors`,
   );
 
   check('no request exhausted its retries', contended.length === 0,
     `${contended.length} returned WALLET_CONTENDED`);
-  check('no 5xx responses', serverErrors.length === 0,
-    JSON.stringify(serverErrors.slice(0, 3)));
+  check('no internal (500) errors', internal.length === 0,
+    JSON.stringify(internal.slice(0, 3).map((r) => r.body)));
+
+  // A shed request carries the same Idempotency-Key on retry. This is the
+  // whole point of the key: backpressure costs latency, never correctness.
+  if (shed.length > 0) {
+    console.log(`  retrying ${shed.length} shed request(s) with their original keys`);
+    const retried = [];
+    for (const original of shed) {
+      retried.push(await post(original.request.path, original.request.body, original.request.key));
+    }
+    const resolved = retried.filter((r) => r.status === 201 || r.status === 200);
+    check('every shed request succeeded on retry', resolved.length === shed.length,
+      `${resolved.length}/${shed.length} resolved`);
+  }
 };
 
 const verifyIntegrity = async () => {

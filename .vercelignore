@@ -1,0 +1,9 @@
+node_modules
+.git
+test
+scripts/load-test.js
+docker-compose.yml
+Dockerfile
+.dockerignore
+.env
+coverage
