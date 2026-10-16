@@ -1,0 +1,74 @@
+name: wallet-service
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: wallet
+      POSTGRES_PASSWORD: wallet
+      POSTGRES_DB: wallet
+    ports:
+      # Override POSTGRES_PORT if 5432 is already taken by a local Postgres.
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U wallet -d wallet']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    command:
+      # Log anything the deadlock detector catches, so the concurrency claims
+      # in the README can be verified rather than taken on faith.
+      - postgres
+      - -c
+      - log_lock_waits=on
+      - -c
+      - deadlock_timeout=200ms
+      - -c
+      - max_connections=200
+
+  # Runs migrations + seed, then exits. The app waits for it to finish.
+  migrate:
+    build: .
+    environment:
+      DATABASE_URL: postgres://wallet:wallet@postgres:5432/wallet
+    command: ['node', 'scripts/migrate.js']
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  seed:
+    build: .
+    environment:
+      DATABASE_URL: postgres://wallet:wallet@postgres:5432/wallet
+    command: ['node', 'scripts/seed.js']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: 'no'
+
+  app:
+    build: .
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      LOG_LEVEL: info
+      DATABASE_URL: postgres://wallet:wallet@postgres:5432/wallet
+      DB_POOL_MAX: 20
+    ports:
+      - '${APP_PORT:-3000}:3000'
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:3000/ready']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  pgdata:
